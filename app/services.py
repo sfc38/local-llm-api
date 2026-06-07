@@ -9,8 +9,23 @@ async def _sse(token_gen: AsyncGenerator[str, None]) -> AsyncGenerator[str, None
     yield "data: [DONE]\n\n"
 
 
-async def generate(client: OllamaClient, prompt: str, model: str | None = None):
-    async for chunk in _sse(client.generate_stream(prompt, model)):
+async def generate(
+    client: OllamaClient,
+    prompt: str,
+    model: str | None = None,
+    images: list[str] | None = None,
+):
+    async for chunk in _sse(client.generate_stream(prompt, model, images)):
+        yield chunk
+
+
+async def describe_image(
+    client: OllamaClient,
+    image: str,
+    prompt: str = "Describe this image in detail.",
+    model: str | None = None,
+):
+    async for chunk in _sse(client.generate_stream(prompt, model, images=[image])):
         yield chunk
 
 

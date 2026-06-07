@@ -13,7 +13,8 @@ Learn API design and local LLM integration by building a clean Python backend th
 ## Features
 
 - `GET /health` — check that the API and Ollama are reachable
-- `POST /generate` — send a prompt, get a response from a local LLM
+- `POST /generate` — send a prompt (and optional images) to the LLM
+- `POST /describe-image` — send a base64-encoded image and get a description
 - `POST /summarize` — summarize a block of text
 - `POST /classify` — classify text into a provided set of categories
 - `POST /extract-keywords` — extract key terms from text
@@ -28,7 +29,7 @@ Learn API design and local LLM integration by building a clean Python backend th
 | API framework | FastAPI | MIT |
 | Server | Uvicorn | BSD |
 | LLM runner | Ollama | MIT |
-| Default model | Qwen2.5 3B | Apache 2.0 |
+| Default model | Qwen2.5-VL 3B | Apache 2.0 |
 | Validation | Pydantic | MIT |
 | Language | Python 3.10+ | PSF |
 
@@ -43,7 +44,7 @@ All tools are free and open-source with licenses compatible with commercial use.
 3. **Qwen2.5 3B model** pulled:
 
 ```bash
-ollama pull qwen2.5:3b
+ollama pull qwen2.5vl:3b
 ```
 
 ---
@@ -70,7 +71,7 @@ pip install -r requirements.txt
 **Step 1 — Start Ollama** (in a separate terminal):
 
 ```bash
-ollama run qwen2.5:3b
+ollama run qwen2.5vl:3b
 ```
 
 **Step 2 — Start the API:**

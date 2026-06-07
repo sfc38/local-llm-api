@@ -3,6 +3,13 @@ from pydantic import BaseModel
 
 class GenerateRequest(BaseModel):
     prompt: str
+    images: list[str] | None = None  # base64-encoded images, optional
+    model: str | None = None
+
+
+class DescribeImageRequest(BaseModel):
+    image: str  # base64-encoded
+    prompt: str = "Describe this image in detail."
     model: str | None = None
 
 

@@ -101,3 +101,24 @@ async def test_extract_keywords_streams_tokens():
                 if line.startswith("data: ") and line != "data: [DONE]"
             ]
     assert len(tokens) > 0
+
+
+@pytest.mark.asyncio
+async def test_describe_image_streams_tokens():
+    # 1x1 red pixel PNG, base64-encoded
+    tiny_image = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADklEQVQI12P4z8BQDwAEgAF/QualIQAAAABJRU5ErkJggg=="
+    )
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{BASE_URL}/describe-image",
+            json={"image": tiny_image, "prompt": "What colour is this image?"},
+        ) as r:
+            assert r.status_code == 200
+            tokens = [
+                line[6:]
+                async for line in r.aiter_lines()
+                if line.startswith("data: ") and line != "data: [DONE]"
+            ]
+    assert len(tokens) > 0

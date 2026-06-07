@@ -8,6 +8,7 @@ from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 from app.ollama_client import OllamaClient
 from app.schemas import (
     ClassifyRequest,
+    DescribeImageRequest,
     ExtractKeywordsRequest,
     GenerateRequest,
     SummarizeRequest,
@@ -58,7 +59,15 @@ async def health():
 @app.post("/generate")
 async def generate(request: GenerateRequest):
     return StreamingResponse(
-        services.generate(ollama, request.prompt, request.model),
+        services.generate(ollama, request.prompt, request.model, request.images),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/describe-image")
+async def describe_image(request: DescribeImageRequest):
+    return StreamingResponse(
+        services.describe_image(ollama, request.image, request.prompt, request.model),
         media_type="text/event-stream",
     )
 

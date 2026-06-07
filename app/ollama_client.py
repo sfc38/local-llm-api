@@ -18,14 +18,20 @@ class OllamaClient:
             return False
 
     async def generate_stream(
-        self, prompt: str, model: str | None = None
+        self,
+        prompt: str,
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         target_model = model or self.model
+        payload: dict = {"model": target_model, "prompt": prompt, "stream": True}
+        if images:
+            payload["images"] = images
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/api/generate",
-                json={"model": target_model, "prompt": prompt, "stream": True},
+                json=payload,
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
