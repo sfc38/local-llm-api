@@ -438,6 +438,8 @@ if page == "Chat":
             a_col, x_col = st.columns([11, 1])
             with a_col:
                 st.info(f"{icon} **{attach_info['name']}** will be attached to your next message.")
+                if attach_info["type"] == "pdf":
+                    st.caption("Note: text PDFs send all pages · scanned PDFs send the first 3 pages as images")
             with x_col:
                 if st.button("✕", key="rm_attach", help="Remove attachment"):
                     st.session_state.pending_attach = None
