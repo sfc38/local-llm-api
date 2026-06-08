@@ -267,6 +267,9 @@ if page == "Chat":
     if "pending_attach" not in st.session_state:
         st.session_state.pending_attach = None
 
+    submitted = False
+    user_input = ""
+
     if st.button("Clear conversation"):
         st.session_state.chat_history = []
         st.session_state.pending_attach = None
@@ -282,46 +285,54 @@ if page == "Chat":
                 st.caption(f"📄 {msg['_pdf_name']}")
             st.markdown(msg.get("_user_text", msg["content"]))
 
-    # ── Attachment strip + 📎 button (sits just above the pinned chat input) ──
-    if st.session_state.pending_attach:
-        attach = st.session_state.pending_attach
-        icon = "🖼️" if attach["type"] == "image" else "📄"
-        c1, c2 = st.columns([9, 1])
-        with c1:
-            st.info(f"{icon} **{attach['name']}** will be attached to your next message.")
-        with c2:
-            if st.button("✕", key="rm_attach", help="Remove attachment"):
-                st.session_state.pending_attach = None
-                st.rerun()
+    # ── Bottom bar: 📎 popover + text input, pinned to viewport bottom ─────────
+    with st.bottom():
+        if st.session_state.pending_attach:
+            attach_info = st.session_state.pending_attach
+            icon = "🖼️" if attach_info["type"] == "image" else "📄"
+            a_col, x_col = st.columns([11, 1])
+            with a_col:
+                st.info(f"{icon} **{attach_info['name']}** will be attached to your next message.")
+            with x_col:
+                if st.button("✕", key="rm_attach", help="Remove attachment"):
+                    st.session_state.pending_attach = None
+                    st.rerun()
 
-    # Right-aligned 📎 popover — visually anchors to bottom of content
-    _, col_attach = st.columns([9, 1])
-    with col_attach:
-        with st.popover("📎", use_container_width=True):
-            st.caption("Attach an image or PDF to your next message.")
-            upl = st.file_uploader(
-                "File",
-                type=["jpg", "jpeg", "png", "pdf"],
-                key=f"chat_file_{st.session_state.file_key}",
-                label_visibility="collapsed",
-            )
-            if upl is not None:
-                raw = upl.read()
-                if upl.type == "application/pdf":
-                    st.session_state.pending_attach = {"type": "pdf", "name": upl.name, "data": raw}
-                else:
-                    st.session_state.pending_attach = {
-                        "type": "image",
-                        "name": upl.name,
-                        "data": base64.b64encode(raw).decode(),
-                    }
-                st.session_state.file_key += 1
-                st.rerun()
+        pb_col, inp_col = st.columns([1, 11])
+        with pb_col:
+            with st.popover("📎", use_container_width=True):
+                st.caption("Attach an image or PDF.")
+                upl = st.file_uploader(
+                    "File",
+                    type=["jpg", "jpeg", "png", "pdf"],
+                    key=f"chat_file_{st.session_state.file_key}",
+                    label_visibility="collapsed",
+                )
+                if upl is not None:
+                    raw = upl.read()
+                    if upl.type == "application/pdf":
+                        st.session_state.pending_attach = {"type": "pdf", "name": upl.name, "data": raw}
+                    else:
+                        st.session_state.pending_attach = {
+                            "type": "image",
+                            "name": upl.name,
+                            "data": base64.b64encode(raw).decode(),
+                        }
+                    st.session_state.file_key += 1
+                    st.rerun()
+        with inp_col:
+            with st.form("chat_form", clear_on_submit=True, border=False):
+                f_text, f_send = st.columns([10, 1])
+                with f_text:
+                    user_input = st.text_input(
+                        "message",
+                        placeholder="Type a message…",
+                        label_visibility="collapsed",
+                    )
+                with f_send:
+                    submitted = st.form_submit_button("➤", use_container_width=True)
 
-    # ── Chat input (pinned to bottom by Streamlit) ────────────────────────────
-    user_input = st.chat_input("Type a message…")
-
-    if user_input:
+    if submitted and user_input:
         attach = st.session_state.pending_attach
         images = None
         pdf_name = None
