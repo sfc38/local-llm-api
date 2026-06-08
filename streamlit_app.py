@@ -357,27 +357,26 @@ if page == "Chat":
             st.rerun()
 
     with col_save:
-        label = "💾 Update" if st.session_state.active_conv_id else "💾 Save"
-        with st.popover(label, use_container_width=True):
+        with st.popover("💾 Save", use_container_width=True):
             if not st.session_state.chat_history:
                 st.caption("Nothing to save yet.")
             else:
-                default_name = st.session_state.active_conv_name or ""
-                save_name = st.text_input("Conversation name", value=default_name,
-                                          placeholder="e.g. PR card analysis")
-                save_as_new = st.checkbox("Save as new copy",
-                                          value=st.session_state.active_conv_id is None)
+                save_name = st.text_input(
+                    "Name",
+                    value=st.session_state.active_conv_name or "",
+                    placeholder="e.g. PR card analysis",
+                )
+                st.caption("Keep the same name to update · change the name to save a new copy")
                 if st.button("Save", key="do_save_conv"):
                     if save_name.strip():
-                        if st.session_state.active_conv_id and not save_as_new:
+                        name_unchanged = save_name.strip() == st.session_state.active_conv_name
+                        if st.session_state.active_conv_id and name_unchanged:
                             httpx.put(
                                 f"{API_URL}/conversations/{st.session_state.active_conv_id}",
                                 json={"name": save_name,
                                       "messages": st.session_state.chat_history},
                                 timeout=5,
                             )
-                            st.session_state.active_conv_name = save_name
-                            st.success("Updated!")
                         else:
                             r = httpx.post(
                                 f"{API_URL}/conversations",
@@ -386,8 +385,7 @@ if page == "Chat":
                                 timeout=5,
                             )
                             st.session_state.active_conv_id = r.json().get("id")
-                            st.session_state.active_conv_name = save_name
-                            st.success("Saved!")
+                        st.session_state.active_conv_name = save_name.strip()
                         st.rerun()
                     else:
                         st.warning("Enter a name first.")
