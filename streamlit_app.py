@@ -74,7 +74,10 @@ with st.sidebar:
         try:
             r = httpx.get(f"{API_URL}/health", timeout=5)
             data = r.json()
-            st.success(f"OK — {data.get('model')}") if r.status_code == 200 else st.error(str(data))
+            if r.status_code == 200:
+                st.success(f"OK — {data.get('model')}")
+            else:
+                st.error(str(data))
         except httpx.ConnectError:
             st.error("API not reachable")
 
