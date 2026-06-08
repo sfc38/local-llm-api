@@ -1,5 +1,7 @@
 import base64
 import io
+import re
+from collections import Counter
 
 import httpx
 import pandas as pd
@@ -60,13 +62,29 @@ def extract_pdf_text(file) -> str:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
+if "page" not in st.session_state:
+    st.session_state.page = "Chat"
+
 with st.sidebar:
     st.title("LLM Playground")
 
-    page = st.radio(
-        "Mode",
-        ["Chat", "Generate", "Describe Image", "Summarize", "Classify", "Extract Keywords", "Reports"],
-    )
+    if st.button(
+        "📊 Reports & Analytics",
+        use_container_width=True,
+        type="primary" if st.session_state.page == "Reports" else "secondary",
+    ):
+        st.session_state.page = "Reports"
+
+    st.divider()
+    st.caption("Tools")
+    for _p in ["Chat", "Generate", "Describe Image", "Summarize", "Classify", "Extract Keywords"]:
+        if st.button(
+            _p,
+            use_container_width=True,
+            key=f"nav_{_p}",
+            type="primary" if st.session_state.page == _p else "secondary",
+        ):
+            st.session_state.page = _p
 
     st.divider()
 
@@ -237,6 +255,9 @@ with st.sidebar:
             st.caption("🎲 Random — different output each run")
         else:
             st.caption(f"📌 Fixed seed {seed} — reproducible output")
+
+
+page = st.session_state.page
 
 
 def base_payload(**kwargs) -> dict:
@@ -458,7 +479,7 @@ elif page == "Extract Keywords":
 # ── Reports ───────────────────────────────────────────────────────────────────
 
 elif page == "Reports":
-    st.title("Reports")
+    st.title("📊 Reports & Analytics")
 
     try:
         r = httpx.get(f"{API_URL}/reports", timeout=5)
@@ -472,34 +493,124 @@ elif page == "Reports":
     else:
         df = pd.DataFrame(data)
         df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["date"] = df["timestamp"].dt.date
+        df["hour"] = df["timestamp"].dt.hour
+        df["estimated_tokens"] = (df["prompt_preview"].str.len() / 4).round().astype(int)
+        df["success"] = df["status_code"] == 200
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Requests", len(df))
-        col2.metric("Avg Response Time", f"{df['response_time_ms'].mean():.0f} ms")
-        col3.metric("Endpoints Used", df["endpoint"].nunique())
-        col4.metric("Success Rate", f"{(df['status_code'] == 200).mean() * 100:.0f}%")
+        # ── Key metrics ──────────────────────────────────────────────────────
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Total Requests", len(df))
+        c2.metric("Avg Response", f"{df['response_time_ms'].mean():.0f} ms")
+        c3.metric("Fastest", f"{df['response_time_ms'].min():.0f} ms")
+        c4.metric("Slowest", f"{df['response_time_ms'].max():.0f} ms")
+        c5.metric("Success Rate", f"{df['success'].mean() * 100:.0f}%")
+        c6.metric("Errors", int((~df['success']).sum()))
+
+        st.divider()
+
+        # ── Activity over time ────────────────────────────────────────────────
+        st.subheader("Activity Over Time")
+        col_day, col_hour = st.columns(2)
+
+        with col_day:
+            st.caption("Requests per day")
+            by_day = df.groupby("date").size().reset_index(name="requests")
+            by_day["date"] = by_day["date"].astype(str)
+            st.bar_chart(by_day.set_index("date"))
+
+        with col_hour:
+            st.caption("Requests by hour of day (0 – 23)")
+            by_hour = df.groupby("hour").size().reindex(range(24), fill_value=0)
+            st.bar_chart(by_hour)
 
         st.divider()
 
-        col_a, col_b = st.columns(2)
+        # ── Endpoint breakdown ────────────────────────────────────────────────
+        st.subheader("Endpoint Breakdown")
+        col_cnt, col_avg = st.columns(2)
 
-        with col_a:
-            st.subheader("Avg Response Time by Endpoint")
-            avg_time = df.groupby("endpoint")["response_time_ms"].mean().sort_values()
-            st.bar_chart(avg_time)
+        with col_cnt:
+            st.caption("Requests by endpoint")
+            st.bar_chart(df["endpoint"].value_counts())
 
-        with col_b:
-            st.subheader("Request Count by Endpoint")
-            counts = df["endpoint"].value_counts()
-            st.bar_chart(counts)
+        with col_avg:
+            st.caption("Avg response time by endpoint (ms)")
+            avg_t = df.groupby("endpoint")["response_time_ms"].mean().sort_values()
+            st.bar_chart(avg_t)
 
         st.divider()
+
+        # ── Model usage ───────────────────────────────────────────────────────
+        st.subheader("Model Usage")
+        col_mod, col_tok = st.columns(2)
+
+        with col_mod:
+            st.caption("Calls per model")
+            st.bar_chart(df["model"].value_counts())
+
+        with col_tok:
+            st.caption("Estimated prompt tokens per request (1 token ≈ 4 chars)")
+            tok_hist = df["estimated_tokens"].value_counts().sort_index()
+            st.bar_chart(tok_hist)
+
+        st.divider()
+
+        # ── Slowest requests ──────────────────────────────────────────────────
+        st.subheader("10 Slowest Requests")
+        slowest = (
+            df.nlargest(10, "response_time_ms")[
+                ["timestamp", "endpoint", "model", "response_time_ms", "status_code", "prompt_preview"]
+            ]
+            .rename(columns={"response_time_ms": "time_ms", "prompt_preview": "prompt"})
+        )
+        st.dataframe(slowest, use_container_width=True)
+
+        st.divider()
+
+        # ── Word frequency ────────────────────────────────────────────────────
+        st.subheader("Top Words in Prompts")
+        _stop = {
+            "the","a","an","is","in","of","to","and","or","for","with","that","this",
+            "it","on","at","by","as","be","was","are","have","has","i","my","you",
+            "your","we","our","can","do","not","from","if","what","how","why","when",
+            "where","which","who","will","they","their","its","but","so","about","all",
+            "also","just","more","some","been","would","could","should","may","might",
+            "get","make","use","any","one","than","then","there","were","had","him",
+            "his","her","he","she","us","me","no","yes","ok","please","text","s",
+        }
+        words: list[str] = []
+        for txt in df["prompt_preview"].dropna():
+            words.extend(w for w in re.findall(r"\b[a-z]{3,}\b", txt.lower()) if w not in _stop)
+
+        if words:
+            freq = pd.DataFrame(Counter(words).most_common(20), columns=["word", "count"])
+            col_wf, col_wt = st.columns([2, 1])
+            with col_wf:
+                st.bar_chart(freq.set_index("word"))
+            with col_wt:
+                st.dataframe(freq, use_container_width=True, hide_index=True)
+        else:
+            st.info("Not enough prompt data for word analysis yet.")
+
+        st.divider()
+
+        # ── Error rate by day ─────────────────────────────────────────────────
+        if len(df["date"].unique()) > 1:
+            st.subheader("Success vs Errors by Day")
+            err_day = df.groupby("date")["success"].agg(
+                successes="sum", total="count"
+            ).reset_index()
+            err_day["errors"] = err_day["total"] - err_day["successes"]
+            err_day["date"] = err_day["date"].astype(str)
+            st.bar_chart(err_day.set_index("date")[["successes", "errors"]])
+            st.divider()
+
+        # ── Raw data ──────────────────────────────────────────────────────────
         st.subheader("All Requests")
         st.dataframe(
-            df[["timestamp", "endpoint", "model", "prompt_preview", "response_time_ms", "status_code"]]
+            df[["timestamp", "endpoint", "model", "prompt_preview", "response_time_ms", "status_code", "estimated_tokens"]]
             .rename(columns={"response_time_ms": "time_ms", "prompt_preview": "prompt"}),
             use_container_width=True,
         )
-
-        csv = df.to_csv(index=False)
-        st.download_button("Download CSV", csv, "requests.csv", "text/csv")
+        st.download_button("⬇ Download CSV", df.to_csv(index=False), "requests.csv", "text/csv")
