@@ -18,6 +18,9 @@ def stream_response(endpoint: str, payload: dict):
     try:
         with httpx.Client(timeout=120) as client:
             with client.stream("POST", f"{API_URL}/{endpoint}", json=payload) as r:
+                log_id = r.headers.get("x-log-id")
+                if log_id:
+                    st.session_state["_pending_log_id"] = int(log_id)
                 if r.status_code != 200:
                     r.read()
                     yield f"[Error {r.status_code}: {r.text}]"
@@ -31,13 +34,29 @@ def stream_response(endpoint: str, payload: dict):
         yield f"[Error: {e}]"
 
 
-def render_stream(endpoint: str, payload: dict):
+def _patch_response(response_text: str):
+    log_id = st.session_state.pop("_pending_log_id", None)
+    if not log_id or not response_text:
+        return
+    try:
+        httpx.patch(
+            f"{API_URL}/requests/{log_id}/response",
+            json={"response_preview": response_text[:1000]},
+            timeout=3,
+        )
+    except Exception:
+        pass
+
+
+def render_stream(endpoint: str, payload: dict) -> str:
     output = st.empty()
     response_text = ""
     for token in stream_response(endpoint, payload):
         response_text += token
         output.markdown(response_text + "▌")
     output.markdown(response_text)
+    _patch_response(response_text)
+    return response_text
 
 
 @st.cache_data(ttl=30)
@@ -409,6 +428,7 @@ if page == "Chat":
                 output.markdown(response_text + "▌")
             output.markdown(response_text)
 
+        _patch_response(response_text)
         st.session_state.chat_history.append({"role": "assistant", "content": response_text})
 
 # ── Generate ──────────────────────────────────────────────────────────────────
@@ -479,7 +499,17 @@ elif page == "Extract Keywords":
 # ── Reports ───────────────────────────────────────────────────────────────────
 
 elif page == "Reports":
-    st.title("📊 Reports & Analytics")
+    st.title("📊 Reports")
+
+    hdr_col, clear_col = st.columns([8, 2])
+    with clear_col:
+        if st.button("🗑️ Clear all logs", use_container_width=True):
+            try:
+                httpx.delete(f"{API_URL}/requests", timeout=5)
+                st.success("Logs cleared.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not clear: {e}")
 
     try:
         r = httpx.get(f"{API_URL}/reports", timeout=5)
@@ -493,124 +523,40 @@ elif page == "Reports":
     else:
         df = pd.DataFrame(data)
         df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["date"] = df["timestamp"].dt.date
-        df["hour"] = df["timestamp"].dt.hour
-        df["estimated_tokens"] = (df["prompt_preview"].str.len() / 4).round().astype(int)
-        df["success"] = df["status_code"] == 200
 
-        # ── Key metrics ──────────────────────────────────────────────────────
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        # ── Key metrics ───────────────────────────────────────────────────────
+        c1, c2, c3 = st.columns(3)
         c1.metric("Total Requests", len(df))
-        c2.metric("Avg Response", f"{df['response_time_ms'].mean():.0f} ms")
-        c3.metric("Fastest", f"{df['response_time_ms'].min():.0f} ms")
-        c4.metric("Slowest", f"{df['response_time_ms'].max():.0f} ms")
-        c5.metric("Success Rate", f"{df['success'].mean() * 100:.0f}%")
-        c6.metric("Errors", int((~df['success']).sum()))
+        c2.metric("Avg Response Time", f"{df['response_time_ms'].mean():.0f} ms")
+        c3.metric("Success Rate", f"{(df['status_code'] == 200).mean() * 100:.0f}%")
 
         st.divider()
 
-        # ── Activity over time ────────────────────────────────────────────────
-        st.subheader("Activity Over Time")
-        col_day, col_hour = st.columns(2)
-
-        with col_day:
-            st.caption("Requests per day")
-            by_day = df.groupby("date").size().reset_index(name="requests")
-            by_day["date"] = by_day["date"].astype(str)
-            st.bar_chart(by_day.set_index("date"))
-
-        with col_hour:
-            st.caption("Requests by hour of day (0 – 23)")
-            by_hour = df.groupby("hour").size().reindex(range(24), fill_value=0)
-            st.bar_chart(by_hour)
+        # ── All prompts & responses ───────────────────────────────────────────
+        st.subheader("All Requests")
+        display_cols = ["timestamp", "endpoint", "model", "prompt_preview", "response_preview",
+                        "response_time_ms", "status_code",
+                        "temperature", "max_tokens", "top_p", "top_k",
+                        "repeat_penalty", "seed", "num_ctx"]
+        display_cols = [c for c in display_cols if c in df.columns]
+        st.dataframe(
+            df[display_cols].rename(columns={
+                "prompt_preview": "prompt",
+                "response_preview": "response",
+                "response_time_ms": "time_ms",
+            }),
+            use_container_width=True,
+        )
+        st.download_button("⬇ Download CSV", df.to_csv(index=False), "requests.csv", "text/csv")
 
         st.divider()
 
         # ── Endpoint breakdown ────────────────────────────────────────────────
         st.subheader("Endpoint Breakdown")
         col_cnt, col_avg = st.columns(2)
-
         with col_cnt:
             st.caption("Requests by endpoint")
             st.bar_chart(df["endpoint"].value_counts())
-
         with col_avg:
             st.caption("Avg response time by endpoint (ms)")
-            avg_t = df.groupby("endpoint")["response_time_ms"].mean().sort_values()
-            st.bar_chart(avg_t)
-
-        st.divider()
-
-        # ── Model usage ───────────────────────────────────────────────────────
-        st.subheader("Model Usage")
-        col_mod, col_tok = st.columns(2)
-
-        with col_mod:
-            st.caption("Calls per model")
-            st.bar_chart(df["model"].value_counts())
-
-        with col_tok:
-            st.caption("Estimated prompt tokens per request (1 token ≈ 4 chars)")
-            tok_hist = df["estimated_tokens"].value_counts().sort_index()
-            st.bar_chart(tok_hist)
-
-        st.divider()
-
-        # ── Slowest requests ──────────────────────────────────────────────────
-        st.subheader("10 Slowest Requests")
-        slowest = (
-            df.nlargest(10, "response_time_ms")[
-                ["timestamp", "endpoint", "model", "response_time_ms", "status_code", "prompt_preview"]
-            ]
-            .rename(columns={"response_time_ms": "time_ms", "prompt_preview": "prompt"})
-        )
-        st.dataframe(slowest, use_container_width=True)
-
-        st.divider()
-
-        # ── Word frequency ────────────────────────────────────────────────────
-        st.subheader("Top Words in Prompts")
-        _stop = {
-            "the","a","an","is","in","of","to","and","or","for","with","that","this",
-            "it","on","at","by","as","be","was","are","have","has","i","my","you",
-            "your","we","our","can","do","not","from","if","what","how","why","when",
-            "where","which","who","will","they","their","its","but","so","about","all",
-            "also","just","more","some","been","would","could","should","may","might",
-            "get","make","use","any","one","than","then","there","were","had","him",
-            "his","her","he","she","us","me","no","yes","ok","please","text","s",
-        }
-        words: list[str] = []
-        for txt in df["prompt_preview"].dropna():
-            words.extend(w for w in re.findall(r"\b[a-z]{3,}\b", txt.lower()) if w not in _stop)
-
-        if words:
-            freq = pd.DataFrame(Counter(words).most_common(20), columns=["word", "count"])
-            col_wf, col_wt = st.columns([2, 1])
-            with col_wf:
-                st.bar_chart(freq.set_index("word"))
-            with col_wt:
-                st.dataframe(freq, use_container_width=True, hide_index=True)
-        else:
-            st.info("Not enough prompt data for word analysis yet.")
-
-        st.divider()
-
-        # ── Error rate by day ─────────────────────────────────────────────────
-        if len(df["date"].unique()) > 1:
-            st.subheader("Success vs Errors by Day")
-            err_day = df.groupby("date")["success"].agg(
-                successes="sum", total="count"
-            ).reset_index()
-            err_day["errors"] = err_day["total"] - err_day["successes"]
-            err_day["date"] = err_day["date"].astype(str)
-            st.bar_chart(err_day.set_index("date")[["successes", "errors"]])
-            st.divider()
-
-        # ── Raw data ──────────────────────────────────────────────────────────
-        st.subheader("All Requests")
-        st.dataframe(
-            df[["timestamp", "endpoint", "model", "prompt_preview", "response_time_ms", "status_code", "estimated_tokens"]]
-            .rename(columns={"response_time_ms": "time_ms", "prompt_preview": "prompt"}),
-            use_container_width=True,
-        )
-        st.download_button("⬇ Download CSV", df.to_csv(index=False), "requests.csv", "text/csv")
+            st.bar_chart(df.groupby("endpoint")["response_time_ms"].mean().sort_values())
