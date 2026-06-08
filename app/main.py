@@ -11,6 +11,7 @@ from app import services
 from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 from app.ollama_client import OllamaClient
 from app.schemas import (
+    ChatRequest,
     ClassifyRequest,
     DescribeImageRequest,
     ExtractKeywordsRequest,
@@ -92,6 +93,18 @@ async def health():
             detail="Ollama is not reachable. Make sure Ollama is running.",
         )
     return {"status": "ok", "ollama": "reachable", "model": OLLAMA_MODEL}
+
+
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    messages = [m.model_dump() for m in request.messages]
+    return StreamingResponse(
+        services.chat(
+            ollama, messages, request.model,
+            request.temperature, request.max_tokens,
+        ),
+        media_type="text/event-stream",
+    )
 
 
 @app.post("/generate")

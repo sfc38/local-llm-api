@@ -14,6 +14,7 @@ def stream_response(endpoint: str, payload: dict):
         with httpx.Client(timeout=120) as client:
             with client.stream("POST", f"{API_URL}/{endpoint}", json=payload) as r:
                 if r.status_code != 200:
+                    r.read()
                     yield f"[Error {r.status_code}: {r.text}]"
                     return
                 for line in r.iter_lines():
@@ -60,11 +61,42 @@ def base_payload(**kwargs) -> dict:
 
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["Generate", "Describe Image", "Summarize", "Classify", "Extract Keywords"]
+tab_chat, tab_gen, tab_img, tab_sum, tab_cls, tab_kw = st.tabs(
+    ["Chat", "Generate", "Describe Image", "Summarize", "Classify", "Extract Keywords"]
 )
 
-with tab1:
+with tab_chat:
+    st.subheader("Chat")
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    if st.button("Clear conversation", key="clear_chat"):
+        st.session_state.chat_history = []
+        st.rerun()
+
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_input = st.chat_input("Type a message...")
+    if user_input:
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        payload = base_payload(messages=st.session_state.chat_history)
+        with st.chat_message("assistant"):
+            output = st.empty()
+            response_text = ""
+            for token in stream_response("chat", payload):
+                response_text += token
+                output.markdown(response_text + "▌")
+            output.markdown(response_text)
+
+        st.session_state.chat_history.append({"role": "assistant", "content": response_text})
+
+with tab_gen:
     st.subheader("Generate")
     prompt = st.text_area("Prompt", height=150, key="gen_prompt")
     uploaded = st.file_uploader("Image (optional)", type=["jpg", "jpeg", "png"], key="gen_img")
@@ -77,7 +109,7 @@ with tab1:
                 payload["images"] = [base64.b64encode(uploaded.read()).decode()]
             render_stream("generate", payload)
 
-with tab2:
+with tab_img:
     st.subheader("Describe Image")
     uploaded_img = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"], key="desc_img")
     desc_prompt = st.text_input("Prompt", value="Describe this image in detail.", key="desc_prompt")
@@ -90,7 +122,7 @@ with tab2:
             b64 = base64.b64encode(img_bytes).decode()
             render_stream("describe-image", base_payload(image=b64, prompt=desc_prompt))
 
-with tab3:
+with tab_sum:
     st.subheader("Summarize")
     text_input = st.text_area("Text to summarize", height=200, key="sum_text")
     if st.button("Summarize", key="sum_btn"):
@@ -99,7 +131,7 @@ with tab3:
         else:
             render_stream("summarize", base_payload(text=text_input))
 
-with tab4:
+with tab_cls:
     st.subheader("Classify")
     cls_text = st.text_area("Text to classify", height=150, key="cls_text")
     cats_input = st.text_input(
@@ -112,7 +144,7 @@ with tab4:
             categories = [c.strip() for c in cats_input.split(",") if c.strip()]
             render_stream("classify", base_payload(text=cls_text, categories=categories))
 
-with tab5:
+with tab_kw:
     st.subheader("Extract Keywords")
     kw_text = st.text_area("Text", height=150, key="kw_text")
     if st.button("Extract Keywords", key="kw_btn"):

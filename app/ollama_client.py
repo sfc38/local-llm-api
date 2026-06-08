@@ -50,3 +50,34 @@ class OllamaClient:
                         yield chunk.get("response", "")
                         if chunk.get("done"):
                             break
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> AsyncGenerator[str, None]:
+        target_model = model or self.model
+        payload: dict = {"model": target_model, "messages": messages, "stream": True}
+        options: dict = {}
+        if temperature is not None:
+            options["temperature"] = temperature
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        if options:
+            payload["options"] = options
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line:
+                        chunk = json.loads(line)
+                        yield chunk.get("message", {}).get("content", "")
+                        if chunk.get("done"):
+                            break

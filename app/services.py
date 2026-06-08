@@ -71,6 +71,19 @@ async def classify(
         yield chunk
 
 
+async def chat(
+    client: OllamaClient,
+    messages: list[dict],
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+):
+    async for chunk in _sse(
+        client.chat_stream(messages, model, temperature, max_tokens)
+    ):
+        yield chunk
+
+
 async def extract_keywords(
     client: OllamaClient,
     text: str,

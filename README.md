@@ -13,7 +13,8 @@ Learn API design and local LLM integration by building a clean Python backend th
 ## Features
 
 - `GET /health` — check that the API and Ollama are reachable
-- `POST /generate` — send a prompt with optional images, control temperature and response length
+- `POST /chat` — multi-turn conversation with full memory across turns
+- `POST /generate` — single prompt with optional images, temperature and length control
 - `POST /describe-image` — send a base64 image and get a description
 - `POST /summarize` — summarize a block of text
 - `POST /classify` — classify text into a provided set of categories
@@ -98,6 +99,24 @@ docker run -p 8000:8000 -e OLLAMA_BASE_URL=http://host.docker.internal:11434 loc
 ---
 
 ## Example Requests
+
+**Multi-turn chat:**
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "My name is Alice."},
+      {"role": "assistant", "content": "Nice to meet you, Alice!"},
+      {"role": "user", "content": "What is my name?"}
+    ]
+  }'
+```
+
+The model sees the full conversation history each time — that is how memory works.
+
+---
 
 **Generate with temperature control:**
 

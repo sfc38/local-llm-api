@@ -125,6 +125,24 @@ async def test_extract_keywords_streams_tokens():
 
 
 @pytest.mark.asyncio
+async def test_chat_streams_tokens_and_remembers_context():
+    messages = [
+        {"role": "user", "content": "My name is Alice."},
+        {"role": "assistant", "content": "Nice to meet you, Alice!"},
+        {"role": "user", "content": "What is my name?"},
+    ]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        async with client.stream(
+            "POST", f"{BASE_URL}/chat",
+            json={"messages": messages},
+        ) as r:
+            assert r.status_code == 200
+            tokens = await _collect_tokens(r)
+    assert len(tokens) > 0
+    assert "Alice" in "".join(tokens)
+
+
+@pytest.mark.asyncio
 async def test_describe_image_streams_tokens():
     image_b64 = _make_test_png()
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:

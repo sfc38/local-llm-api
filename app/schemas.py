@@ -37,3 +37,15 @@ class ExtractKeywordsRequest(BaseModel):
     model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1, le=8192)
+
+
+class Message(BaseModel):
+    role: str   # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[Message]
+    model: str | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=8192)
