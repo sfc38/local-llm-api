@@ -286,7 +286,7 @@ if page == "Chat":
             st.markdown(msg.get("_user_text", msg["content"]))
 
     # ── Bottom bar: 📎 popover + text input, pinned to viewport bottom ─────────
-    with st.bottom():
+    with st.bottom:
         if st.session_state.pending_attach:
             attach_info = st.session_state.pending_attach
             icon = "🖼️" if attach_info["type"] == "image" else "📄"
