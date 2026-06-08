@@ -3,5 +3,6 @@ uvicorn[standard]
 httpx
 pydantic
 streamlit
+pypdf
 pytest
 pytest-asyncio

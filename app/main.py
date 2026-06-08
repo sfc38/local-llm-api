@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ from httpx import ConnectError, RemoteProtocolError, TimeoutException
 
 from app import services
 from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.database import init_db, log_request
 from app.ollama_client import OllamaClient
 from app.schemas import (
     ChatRequest,
@@ -30,10 +32,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+init_db()
+
 app = FastAPI(
     title="Local LLM API Playground",
     description="FastAPI wrapper for a locally running LLM via Ollama.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -45,64 +49,90 @@ app.add_middleware(
 
 ollama = OllamaClient(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL)
 
+_SKIP_LOG = {"/health", "/docs", "/openapi.json", "/redoc", "/models", "/reports"}
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
+    body_bytes = await request.body()
+    model_used = OLLAMA_MODEL
+    prompt_preview = ""
+    try:
+        data = json.loads(body_bytes)
+        model_used = data.get("model") or OLLAMA_MODEL
+        prompt = data.get("prompt") or data.get("text") or ""
+        messages = data.get("messages", [])
+        if messages:
+            last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+            prompt = last_user or prompt
+        prompt_preview = str(prompt)[:300]
+    except Exception:
+        pass
+
     response = await call_next(request)
-    duration = time.time() - start
-    logger.info(
-        "%s %s | %s | %.2fs",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration,
-    )
+    duration_ms = int((time.time() - start) * 1000)
+    logger.info("%s %s | %s | %dms", request.method, request.url.path, response.status_code, duration_ms)
+
+    if request.url.path not in _SKIP_LOG and request.method == "POST":
+        log_request(request.url.path, model_used, prompt_preview, duration_ms, response.status_code)
+
     return response
 
 
 @app.exception_handler(ConnectError)
 async def connect_error_handler(request, exc):
-    return JSONResponse(
-        status_code=503,
-        content={"error": "Ollama is not reachable. Make sure Ollama is running."},
-    )
+    return JSONResponse(status_code=503, content={"error": "Ollama is not reachable. Make sure Ollama is running."})
 
 
 @app.exception_handler(TimeoutException)
 async def timeout_error_handler(request, exc):
-    return JSONResponse(
-        status_code=504,
-        content={"error": "Ollama timed out. The model may still be loading."},
-    )
+    return JSONResponse(status_code=504, content={"error": "Ollama timed out. The model may still be loading."})
 
 
 @app.exception_handler(RemoteProtocolError)
 async def remote_protocol_error_handler(request, exc):
-    return JSONResponse(
-        status_code=502,
-        content={"error": "Ollama closed the connection unexpectedly. The model may have rejected the input."},
-    )
+    return JSONResponse(status_code=502, content={"error": "Ollama closed the connection unexpectedly."})
+
+
+def _opts(r) -> dict:
+    return {k: v for k, v in {
+        "temperature": r.temperature,
+        "max_tokens": r.max_tokens,
+        "top_p": r.top_p,
+        "top_k": r.top_k,
+        "repeat_penalty": r.repeat_penalty,
+        "seed": r.seed,
+        "num_ctx": r.num_ctx,
+    }.items() if v is not None}
 
 
 @app.get("/health")
 async def health():
     if not await ollama.is_reachable():
-        raise HTTPException(
-            status_code=503,
-            detail="Ollama is not reachable. Make sure Ollama is running.",
-        )
+        raise HTTPException(status_code=503, detail="Ollama is not reachable.")
     return {"status": "ok", "ollama": "reachable", "model": OLLAMA_MODEL}
+
+
+@app.get("/models")
+async def get_models():
+    try:
+        return {"models": await ollama.get_models()}
+    except (ConnectError, TimeoutException):
+        raise HTTPException(status_code=503, detail="Ollama is not reachable.")
+
+
+@app.get("/reports")
+async def get_reports():
+    from app.database import get_requests
+    return {"requests": get_requests()}
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    messages = [m.model_dump() for m in request.messages]
+    messages = [m.model_dump(exclude_none=True) for m in request.messages]
     return StreamingResponse(
-        services.chat(
-            ollama, messages, request.model,
-            request.temperature, request.max_tokens,
-        ),
+        services.chat(ollama, messages, request.model, _opts(request)),
         media_type="text/event-stream",
     )
 
@@ -110,10 +140,7 @@ async def chat(request: ChatRequest):
 @app.post("/generate")
 async def generate(request: GenerateRequest):
     return StreamingResponse(
-        services.generate(
-            ollama, request.prompt, request.model,
-            request.images, request.temperature, request.max_tokens,
-        ),
+        services.generate(ollama, request.prompt, request.images, request.model, _opts(request)),
         media_type="text/event-stream",
     )
 
@@ -121,10 +148,7 @@ async def generate(request: GenerateRequest):
 @app.post("/describe-image")
 async def describe_image(request: DescribeImageRequest):
     return StreamingResponse(
-        services.describe_image(
-            ollama, request.image, request.prompt,
-            request.model, request.temperature, request.max_tokens,
-        ),
+        services.describe_image(ollama, request.image, request.prompt, request.model, _opts(request)),
         media_type="text/event-stream",
     )
 
@@ -132,10 +156,7 @@ async def describe_image(request: DescribeImageRequest):
 @app.post("/summarize")
 async def summarize(request: SummarizeRequest):
     return StreamingResponse(
-        services.summarize(
-            ollama, request.text, request.model,
-            request.temperature, request.max_tokens,
-        ),
+        services.summarize(ollama, request.text, request.model, _opts(request)),
         media_type="text/event-stream",
     )
 
@@ -143,10 +164,7 @@ async def summarize(request: SummarizeRequest):
 @app.post("/classify")
 async def classify(request: ClassifyRequest):
     return StreamingResponse(
-        services.classify(
-            ollama, request.text, request.categories,
-            request.model, request.temperature, request.max_tokens,
-        ),
+        services.classify(ollama, request.text, request.categories, request.model, _opts(request)),
         media_type="text/event-stream",
     )
 
@@ -154,9 +172,6 @@ async def classify(request: ClassifyRequest):
 @app.post("/extract-keywords")
 async def extract_keywords(request: ExtractKeywordsRequest):
     return StreamingResponse(
-        services.extract_keywords(
-            ollama, request.text, request.model,
-            request.temperature, request.max_tokens,
-        ),
+        services.extract_keywords(ollama, request.text, request.model, _opts(request)),
         media_type="text/event-stream",
     )
