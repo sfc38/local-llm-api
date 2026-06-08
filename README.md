@@ -21,7 +21,9 @@ Learn API design and local LLM integration by building a clean Python backend th
 - `POST /extract-keywords` — extract key terms from text
 - Per-request model selector — override the default model on any endpoint
 - Streaming responses via Server-Sent Events (SSE)
-- Request logging to `logs/api.log`
+- Request logging to SQLite (`logs/requests.db`) and `logs/api.log`
+- Reports page in Streamlit — metrics, charts, CSV export of all requests
+- PDF and image attachments in the Streamlit chat interface
 - Interactive API docs at `http://127.0.0.1:8000/docs` (Swagger UI, built-in)
 - Streamlit frontend for browser-based testing
 
@@ -154,11 +156,16 @@ requests.post("http://localhost:8000/describe-image", json={
 
 All endpoints accept these optional fields:
 
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Override the default model for this request |
-| `temperature` | float (0–2) | Controls randomness. Lower = more focused |
-| `max_tokens` | int (1–8192) | Maximum tokens to generate |
+| Field | Type | Range | Description |
+|---|---|---|---|
+| `model` | string | — | Override the default model for this request |
+| `temperature` | float | 0–2 | Randomness. Lower = more focused, higher = more creative |
+| `max_tokens` | int | 1–8192 | Maximum tokens to generate |
+| `top_p` | float | 0–1 | Nucleus sampling. 0.9 considers top-90% of probability mass |
+| `top_k` | int | 1–100 | Only sample from the top-k most likely next tokens |
+| `repeat_penalty` | float | 0.5–2 | Penalise recently used tokens to reduce repetition |
+| `seed` | int | — | Set for reproducible outputs |
+| `num_ctx` | int | 512–32768 | Context window size in tokens |
 
 ---
 
@@ -184,7 +191,7 @@ local-llm-api/
     ollama_client.py — Reusable async HTTP client for Ollama
     services.py      — Prompt templates and SSE streaming
   tests/
-    test_api.py      — Integration tests (7 tests, all passing)
+    test_api.py      — Integration tests (8 tests, all passing)
   streamlit_app.py   — Browser-based UI playground
   Dockerfile         — Container for the FastAPI server
   requirements.txt
@@ -205,8 +212,8 @@ pytest tests/ -v
 ## Future Improvements
 
 - Oracle Cloud deployment (Ollama + FastAPI on Always Free Ampere ARM instance)
-- Conversation history / multi-turn chat endpoint
-- File upload endpoint (PDF, txt) with automatic summarization
+- Conversation history limit (truncate old messages at context window)
+- File upload endpoint (PDF, txt) → auto-summarize flow
 - Rate limiting
 - Authentication / API key support
 
