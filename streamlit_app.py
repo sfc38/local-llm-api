@@ -6,7 +6,6 @@ import streamlit as st
 API_URL = "http://localhost:8000"
 
 st.set_page_config(page_title="Local LLM API Playground", layout="wide")
-st.title("Local LLM API Playground")
 
 
 def stream_response(endpoint: str, payload: dict):
@@ -37,14 +36,21 @@ def render_stream(endpoint: str, payload: dict):
 
 # Sidebar
 with st.sidebar:
-    st.header("Settings")
+    st.title("LLM Playground")
+
+    page = st.radio(
+        "Mode",
+        ["Chat", "Generate", "Describe Image", "Summarize", "Classify", "Extract Keywords"],
+    )
+
+    st.divider()
 
     if st.button("Check API Health"):
         try:
             r = httpx.get(f"{API_URL}/health", timeout=5)
             data = r.json()
             if r.status_code == 200:
-                st.success(f"OK — model: {data.get('model')}")
+                st.success(f"OK — {data.get('model')}")
             else:
                 st.error(f"Error: {data}")
         except httpx.ConnectError:
@@ -60,18 +66,14 @@ def base_payload(**kwargs) -> dict:
     return {"model": model, "temperature": temperature, "max_tokens": max_tokens, **kwargs}
 
 
-# Tabs
-tab_chat, tab_gen, tab_img, tab_sum, tab_cls, tab_kw = st.tabs(
-    ["Chat", "Generate", "Describe Image", "Summarize", "Classify", "Extract Keywords"]
-)
-
-with tab_chat:
-    st.subheader("Chat")
+# --- Chat ---
+if page == "Chat":
+    st.title("Chat")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    if st.button("Clear conversation", key="clear_chat"):
+    if st.button("Clear conversation"):
         st.session_state.chat_history = []
         st.rerun()
 
@@ -96,11 +98,12 @@ with tab_chat:
 
         st.session_state.chat_history.append({"role": "assistant", "content": response_text})
 
-with tab_gen:
-    st.subheader("Generate")
-    prompt = st.text_area("Prompt", height=150, key="gen_prompt")
-    uploaded = st.file_uploader("Image (optional)", type=["jpg", "jpeg", "png"], key="gen_img")
-    if st.button("Generate", key="gen_btn"):
+# --- Generate ---
+elif page == "Generate":
+    st.title("Generate")
+    prompt = st.text_area("Prompt", height=150)
+    uploaded = st.file_uploader("Image (optional)", type=["jpg", "jpeg", "png"])
+    if st.button("Generate"):
         if not prompt:
             st.warning("Enter a prompt.")
         else:
@@ -109,11 +112,12 @@ with tab_gen:
                 payload["images"] = [base64.b64encode(uploaded.read()).decode()]
             render_stream("generate", payload)
 
-with tab_img:
-    st.subheader("Describe Image")
-    uploaded_img = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"], key="desc_img")
-    desc_prompt = st.text_input("Prompt", value="Describe this image in detail.", key="desc_prompt")
-    if st.button("Describe", key="desc_btn"):
+# --- Describe Image ---
+elif page == "Describe Image":
+    st.title("Describe Image")
+    uploaded_img = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"])
+    desc_prompt = st.text_input("Prompt", value="Describe this image in detail.")
+    if st.button("Describe"):
         if not uploaded_img:
             st.warning("Upload an image first.")
         else:
@@ -122,32 +126,35 @@ with tab_img:
             b64 = base64.b64encode(img_bytes).decode()
             render_stream("describe-image", base_payload(image=b64, prompt=desc_prompt))
 
-with tab_sum:
-    st.subheader("Summarize")
-    text_input = st.text_area("Text to summarize", height=200, key="sum_text")
-    if st.button("Summarize", key="sum_btn"):
+# --- Summarize ---
+elif page == "Summarize":
+    st.title("Summarize")
+    text_input = st.text_area("Text to summarize", height=200)
+    if st.button("Summarize"):
         if not text_input:
             st.warning("Enter some text.")
         else:
             render_stream("summarize", base_payload(text=text_input))
 
-with tab_cls:
-    st.subheader("Classify")
-    cls_text = st.text_area("Text to classify", height=150, key="cls_text")
+# --- Classify ---
+elif page == "Classify":
+    st.title("Classify")
+    cls_text = st.text_area("Text to classify", height=150)
     cats_input = st.text_input(
-        "Categories (comma-separated)", value="finance, sports, technology, politics", key="cls_cats"
+        "Categories (comma-separated)", value="finance, sports, technology, politics"
     )
-    if st.button("Classify", key="cls_btn"):
+    if st.button("Classify"):
         if not cls_text or not cats_input:
             st.warning("Enter text and categories.")
         else:
             categories = [c.strip() for c in cats_input.split(",") if c.strip()]
             render_stream("classify", base_payload(text=cls_text, categories=categories))
 
-with tab_kw:
-    st.subheader("Extract Keywords")
-    kw_text = st.text_area("Text", height=150, key="kw_text")
-    if st.button("Extract Keywords", key="kw_btn"):
+# --- Extract Keywords ---
+elif page == "Extract Keywords":
+    st.title("Extract Keywords")
+    kw_text = st.text_area("Text", height=150)
+    if st.button("Extract Keywords"):
         if not kw_text:
             st.warning("Enter some text.")
         else:
