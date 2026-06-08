@@ -90,22 +90,25 @@ def extract_pdf_text(data: bytes) -> str:
         return ""
 
 
-def pdf_to_images(data: bytes, max_pages: int = 3) -> list[str]:
-    """Render each PDF page as a base64 PNG — for scanned / image-based PDFs."""
+def pdf_to_images(data: bytes, max_pages: int = 3) -> tuple[list[str], str]:
+    """
+    Render each PDF page as a base64 PNG.
+    Returns (images, error_message). On success error_message is "".
+    """
     try:
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(data)
         images = []
         for i in range(min(len(doc), max_pages)):
             page = doc[i]
-            bitmap = page.render(scale=2)      # 2× for readability
+            bitmap = page.render(scale=1.5)    # 1.5× balances readability vs token cost
             pil_img = bitmap.to_pil()
             buf = io.BytesIO()
-            pil_img.save(buf, format="PNG")
+            pil_img.save(buf, format="JPEG", quality=85)   # JPEG = ~5× smaller than PNG
             images.append(base64.b64encode(buf.getvalue()).decode())
-        return images
-    except Exception:
-        return []
+        return images, ""
+    except Exception as e:
+        return [], str(e)
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -498,17 +501,19 @@ if page == "Chat":
                     )
                 else:
                     # Scanned / image-based PDF — render pages and send as images
-                    images = pdf_to_images(attach["data"])
+                    images, render_err = pdf_to_images(attach["data"])
                     if images:
                         full_content = (
                             f"{user_input}\n\n"
                             f"[The user attached a scanned PDF named '{pdf_name}'. "
-                            f"The pages are provided as images below — please read them visually.]"
+                            f"The pages are provided as images — please read them visually.]"
                         )
                     else:
+                        err_detail = f" ({render_err})" if render_err else ""
                         full_content = (
                             f"{user_input}\n\n"
-                            f"[The user attached '{pdf_name}' but it could not be processed.]"
+                            f"[Could not render '{pdf_name}' as images{err_detail}. "
+                            f"Only text-based PDFs can be processed.]"
                         )
             else:
                 images = [attach["data"]]
@@ -545,7 +550,14 @@ if page == "Chat":
             for token in stream_response("chat", payload):
                 response_text += token
                 output.markdown(response_text + "▌")
-            output.markdown(response_text)
+            if response_text.strip():
+                output.markdown(response_text)
+            else:
+                output.warning(
+                    "The model returned an empty response. "
+                    "If you attached a scanned PDF, it may be too large — "
+                    "try increasing **num_ctx** in the sidebar or use a shorter document."
+                )
 
         _patch_response(response_text)
         st.session_state.chat_history.append({"role": "assistant", "content": response_text})
