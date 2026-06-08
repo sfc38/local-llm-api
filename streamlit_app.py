@@ -264,41 +264,77 @@ if page == "Chat":
         st.session_state.chat_history = []
     if "file_key" not in st.session_state:
         st.session_state.file_key = 0
+    if "pending_attach" not in st.session_state:
+        st.session_state.pending_attach = None
 
     if st.button("Clear conversation"):
         st.session_state.chat_history = []
+        st.session_state.pending_attach = None
         st.rerun()
 
+    # Render conversation history
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             if msg.get("_images"):
                 for img_b64 in msg["_images"]:
                     st.image(base64.b64decode(img_b64), width=250)
             if msg.get("_pdf_name"):
-                st.caption(f"📎 {msg['_pdf_name']}")
-            st.markdown(msg["content"] if not msg.get("_pdf_name") else msg.get("_user_text", msg["content"]))
+                st.caption(f"📄 {msg['_pdf_name']}")
+            st.markdown(msg.get("_user_text", msg["content"]))
 
-    attachment = st.file_uploader(
-        "Attach image or PDF (optional)",
-        type=["jpg", "jpeg", "png", "pdf"],
-        key=f"chat_file_{st.session_state.file_key}",
-    )
+    # ── Attachment strip + 📎 button (sits just above the pinned chat input) ──
+    if st.session_state.pending_attach:
+        attach = st.session_state.pending_attach
+        icon = "🖼️" if attach["type"] == "image" else "📄"
+        c1, c2 = st.columns([9, 1])
+        with c1:
+            st.info(f"{icon} **{attach['name']}** will be attached to your next message.")
+        with c2:
+            if st.button("✕", key="rm_attach", help="Remove attachment"):
+                st.session_state.pending_attach = None
+                st.rerun()
 
-    user_input = st.chat_input("Type a message...")
+    # Right-aligned 📎 popover — visually anchors to bottom of content
+    _, col_attach = st.columns([9, 1])
+    with col_attach:
+        with st.popover("📎", use_container_width=True):
+            st.caption("Attach an image or PDF to your next message.")
+            upl = st.file_uploader(
+                "File",
+                type=["jpg", "jpeg", "png", "pdf"],
+                key=f"chat_file_{st.session_state.file_key}",
+                label_visibility="collapsed",
+            )
+            if upl is not None:
+                raw = upl.read()
+                if upl.type == "application/pdf":
+                    st.session_state.pending_attach = {"type": "pdf", "name": upl.name, "data": raw}
+                else:
+                    st.session_state.pending_attach = {
+                        "type": "image",
+                        "name": upl.name,
+                        "data": base64.b64encode(raw).decode(),
+                    }
+                st.session_state.file_key += 1
+                st.rerun()
+
+    # ── Chat input (pinned to bottom by Streamlit) ────────────────────────────
+    user_input = st.chat_input("Type a message…")
 
     if user_input:
+        attach = st.session_state.pending_attach
         images = None
         pdf_name = None
         full_content = user_input
 
-        if attachment:
-            if attachment.type == "application/pdf":
-                pdf_text = extract_pdf_text(attachment)
-                full_content = f"{user_input}\n\n[Attached PDF: {attachment.name}]\n{pdf_text}"
-                pdf_name = attachment.name
+        if attach:
+            if attach["type"] == "pdf":
+                import io
+                pdf_text = extract_pdf_text(io.BytesIO(attach["data"]))
+                full_content = f"{user_input}\n\n[Attached PDF: {attach['name']}]\n{pdf_text}"
+                pdf_name = attach["name"]
             else:
-                img_b64 = base64.b64encode(attachment.read()).decode()
-                images = [img_b64]
+                images = [attach["data"]]
 
         msg = {"role": "user", "content": full_content, "_user_text": user_input}
         if images:
@@ -308,13 +344,13 @@ if page == "Chat":
             msg["_pdf_name"] = pdf_name
 
         st.session_state.chat_history.append(msg)
-        st.session_state.file_key += 1
+        st.session_state.pending_attach = None
 
         with st.chat_message("user"):
             if images:
                 st.image(base64.b64decode(images[0]), width=250)
             if pdf_name:
-                st.caption(f"📎 {pdf_name}")
+                st.caption(f"📄 {pdf_name}")
             st.markdown(user_input)
 
         api_messages = [
