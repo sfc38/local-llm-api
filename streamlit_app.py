@@ -70,13 +70,31 @@ def fetch_models() -> list[str]:
     return ["qwen2.5vl:3b"]
 
 
-def extract_pdf_text(file) -> str:
+def extract_pdf_text(data: bytes) -> str:
     try:
         import pypdf
-        reader = pypdf.PdfReader(io.BytesIO(file.read()))
+        reader = pypdf.PdfReader(io.BytesIO(data))
         return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-    except Exception as e:
-        return f"[Could not extract PDF text: {e}]"
+    except Exception:
+        return ""
+
+
+def pdf_to_images(data: bytes, max_pages: int = 3) -> list[str]:
+    """Render each PDF page as a base64 PNG — for scanned / image-based PDFs."""
+    try:
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(data)
+        images = []
+        for i in range(min(len(doc), max_pages)):
+            page = doc[i]
+            bitmap = page.render(scale=2)      # 2× for readability
+            pil_img = bitmap.to_pil()
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            images.append(base64.b64encode(buf.getvalue()).decode())
+        return images
+    except Exception:
+        return []
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -382,16 +400,28 @@ if page == "Chat":
 
         if attach:
             if attach["type"] == "pdf":
-                import io
-                pdf_text = extract_pdf_text(io.BytesIO(attach["data"]))
-                if not pdf_text or pdf_text.startswith("[Could not"):
-                    pdf_text = "[No text could be extracted — the PDF may be image-based or scanned]"
-                full_content = (
-                    f"{user_input}\n\n"
-                    f"[The user attached a PDF file named '{attach['name']}'. "
-                    f"The following text was extracted from it:]\n\n{pdf_text}"
-                )
                 pdf_name = attach["name"]
+                pdf_text = extract_pdf_text(attach["data"])
+                if pdf_text:
+                    full_content = (
+                        f"{user_input}\n\n"
+                        f"[The user attached a PDF named '{pdf_name}'. "
+                        f"Extracted text:]\n\n{pdf_text}"
+                    )
+                else:
+                    # Scanned / image-based PDF — render pages and send as images
+                    images = pdf_to_images(attach["data"])
+                    if images:
+                        full_content = (
+                            f"{user_input}\n\n"
+                            f"[The user attached a scanned PDF named '{pdf_name}'. "
+                            f"The pages are provided as images below — please read them visually.]"
+                        )
+                    else:
+                        full_content = (
+                            f"{user_input}\n\n"
+                            f"[The user attached '{pdf_name}' but it could not be processed.]"
+                        )
             else:
                 images = [attach["data"]]
 

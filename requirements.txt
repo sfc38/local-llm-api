@@ -4,5 +4,6 @@ httpx
 pydantic
 streamlit
 pypdf
+pypdfium2
 pytest
 pytest-asyncio
