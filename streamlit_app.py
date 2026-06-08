@@ -50,6 +50,7 @@ def _patch_response(response_text: str):
 
 def render_stream(endpoint: str, payload: dict) -> str:
     output = st.empty()
+    output.markdown("_Thinking…_")
     response_text = ""
     for token in stream_response(endpoint, payload):
         response_text += token
@@ -539,6 +540,7 @@ if page == "Chat":
 
         with st.chat_message("assistant"):
             output = st.empty()
+            output.markdown("_Thinking…_")
             response_text = ""
             for token in stream_response("chat", payload):
                 response_text += token
