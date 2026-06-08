@@ -1,24 +1,28 @@
 # Local LLM API Playground
 
-A FastAPI project that exposes a local LLM through API endpoints using Ollama and Qwen2.5. The project demonstrates Python API creation, JSON request/response design, and local LLM inference without paid API calls.
+A FastAPI project that exposes a local LLM through API endpoints using Ollama and Qwen2.5-VL. Demonstrates Python API creation, JSON request/response design, streaming responses, and local LLM inference without paid API calls.
 
 ---
 
 ## Goal
 
-Learn API design and local LLM integration by building a clean Python backend that accepts prompts and returns AI-generated responses — entirely offline, no paid services required.
+Learn API design and local LLM integration by building a clean Python backend that accepts prompts and images, and returns AI-generated responses — entirely offline, no paid services required.
 
 ---
 
 ## Features
 
 - `GET /health` — check that the API and Ollama are reachable
-- `POST /generate` — send a prompt (and optional images) to the LLM
-- `POST /describe-image` — send a base64-encoded image and get a description
+- `POST /generate` — send a prompt with optional images, control temperature and response length
+- `POST /describe-image` — send a base64 image and get a description
 - `POST /summarize` — summarize a block of text
 - `POST /classify` — classify text into a provided set of categories
 - `POST /extract-keywords` — extract key terms from text
+- Per-request model selector — override the default model on any endpoint
+- Streaming responses via Server-Sent Events (SSE)
+- Request logging to `logs/api.log`
 - Interactive API docs at `http://127.0.0.1:8000/docs` (Swagger UI, built-in)
+- Streamlit frontend for browser-based testing
 
 ---
 
@@ -30,7 +34,9 @@ Learn API design and local LLM integration by building a clean Python backend th
 | Server | Uvicorn | BSD |
 | LLM runner | Ollama | MIT |
 | Default model | Qwen2.5-VL 3B | Apache 2.0 |
+| HTTP client | httpx | BSD |
 | Validation | Pydantic | MIT |
+| Frontend | Streamlit | Apache 2.0 |
 | Language | Python 3.10+ | PSF |
 
 All tools are free and open-source with licenses compatible with commercial use.
@@ -40,8 +46,8 @@ All tools are free and open-source with licenses compatible with commercial use.
 ## Prerequisites
 
 1. **Python 3.10+** installed
-2. **Ollama** installed — download from [ollama.com](https://ollama.com) (free, open-source)
-3. **Qwen2.5 3B model** pulled:
+2. **Ollama** installed — download from [ollama.com](https://ollama.com) (free, open-source, use the official Mac/Windows app, not Homebrew)
+3. **Qwen2.5-VL 3B model** pulled:
 
 ```bash
 ollama pull qwen2.5vl:3b
@@ -52,15 +58,12 @@ ollama pull qwen2.5vl:3b
 ## Setup
 
 ```bash
-# Clone the repo
 git clone https://github.com/sfc38/local-llm-api.git
 cd local-llm-api
 
-# Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate   # on Windows: venv\Scripts\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -68,11 +71,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-**Step 1 — Start Ollama** (in a separate terminal):
-
-```bash
-ollama run qwen2.5vl:3b
-```
+**Step 1 — Ollama is already running** if you see the llama icon in your menu bar. If not, open the Ollama app.
 
 **Step 2 — Start the API:**
 
@@ -80,31 +79,78 @@ ollama run qwen2.5vl:3b
 uvicorn app.main:app --reload
 ```
 
-**Step 3 — Open the interactive docs:**
+**Step 3 — Choose your interface:**
 
-```
-http://127.0.0.1:8000/docs
+- **Swagger UI** (API testing): `http://127.0.0.1:8000/docs`
+- **Streamlit UI** (browser playground): `streamlit run streamlit_app.py`
+
+---
+
+## Docker
+
+Build and run the API in a container (Ollama must be running on the host):
+
+```bash
+docker build -t local-llm-api .
+docker run -p 8000:8000 -e OLLAMA_BASE_URL=http://host.docker.internal:11434 local-llm-api
 ```
 
 ---
 
 ## Example Requests
 
-**Generate a response:**
+**Generate with temperature control:**
 
 ```bash
 curl -X POST http://127.0.0.1:8000/generate \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Explain what RAG means in simple terms."}'
+  -d '{"prompt": "Explain what RAG means.", "temperature": 0.5, "max_tokens": 200}'
 ```
 
-**Response:**
+**Use a different model for one request:**
 
-```json
-{
-  "answer": "RAG means Retrieval-Augmented Generation. It lets an LLM answer using information retrieved from documents."
-}
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Hello", "model": "qwen2.5-coder:3b"}'
 ```
+
+**Describe an image (Python):**
+
+```python
+import base64, requests
+
+with open("photo.jpg", "rb") as f:
+    b64 = base64.b64encode(f.read()).decode()
+
+requests.post("http://localhost:8000/describe-image", json={
+    "image": b64,
+    "prompt": "What is in this image?"
+})
+```
+
+---
+
+## Request Parameters
+
+All endpoints accept these optional fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Override the default model for this request |
+| `temperature` | float (0–2) | Controls randomness. Lower = more focused |
+| `max_tokens` | int (1–8192) | Maximum tokens to generate |
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server address |
+| `OLLAMA_MODEL` | `qwen2.5vl:3b` | Default model |
+
+For Oracle Cloud deployment: set `OLLAMA_BASE_URL=http://<server-ip>:11434`.
 
 ---
 
@@ -113,29 +159,37 @@ curl -X POST http://127.0.0.1:8000/generate \
 ```
 local-llm-api/
   app/
-    __init__.py
-    main.py          — FastAPI app and route definitions
-    schemas.py       — Pydantic request/response models
-    ollama_client.py — HTTP client for Ollama
-    services.py      — Business logic per endpoint
+    main.py          — FastAPI app, routes, logging, error handlers, CORS
+    config.py        — Environment variable config
+    schemas.py       — Pydantic request models
+    ollama_client.py — Reusable async HTTP client for Ollama
+    services.py      — Prompt templates and SSE streaming
   tests/
-    test_api.py
+    test_api.py      — Integration tests (7 tests, all passing)
+  streamlit_app.py   — Browser-based UI playground
+  Dockerfile         — Container for the FastAPI server
   requirements.txt
-  README.md
+```
+
+---
+
+## Running Tests
+
+Requires both Ollama and the FastAPI server to be running.
+
+```bash
+pytest tests/ -v
 ```
 
 ---
 
 ## Future Improvements
 
-- Temperature and max token parameters on requests
-- Model selector (switch between Qwen2.5 variants, Llama 3, etc.)
-- Structured logging
-- Better error handling and input validation
-- Unit and integration tests
-- Streamlit frontend for interactive prompting
-- Dockerfile for portable deployment
-- README screenshots of Swagger UI
+- Oracle Cloud deployment (Ollama + FastAPI on Always Free Ampere ARM instance)
+- Conversation history / multi-turn chat endpoint
+- File upload endpoint (PDF, txt) with automatic summarization
+- Rate limiting
+- Authentication / API key support
 
 ---
 

@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.env
+logs/
+tests/
+streamlit_app.py
+CLAUDE.md
+live_project_decisions.md
+.git/

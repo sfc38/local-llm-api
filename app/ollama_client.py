@@ -22,11 +22,21 @@ class OllamaClient:
         prompt: str,
         model: str | None = None,
         images: list[str] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
         target_model = model or self.model
         payload: dict = {"model": target_model, "prompt": prompt, "stream": True}
         if images:
             payload["images"] = images
+        options: dict = {}
+        if temperature is not None:
+            options["temperature"] = temperature
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        if options:
+            payload["options"] = options
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",

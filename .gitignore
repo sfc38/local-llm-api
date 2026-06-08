@@ -17,6 +17,9 @@ build/
 .env
 .env.*
 
+# Logs
+logs/
+
 # macOS
 .DS_Store
 

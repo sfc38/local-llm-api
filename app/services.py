@@ -14,8 +14,12 @@ async def generate(
     prompt: str,
     model: str | None = None,
     images: list[str] | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ):
-    async for chunk in _sse(client.generate_stream(prompt, model, images)):
+    async for chunk in _sse(
+        client.generate_stream(prompt, model, images, temperature, max_tokens)
+    ):
         yield chunk
 
 
@@ -24,14 +28,26 @@ async def describe_image(
     image: str,
     prompt: str = "Describe this image in detail.",
     model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ):
-    async for chunk in _sse(client.generate_stream(prompt, model, images=[image])):
+    async for chunk in _sse(
+        client.generate_stream(prompt, model, images=[image], temperature=temperature, max_tokens=max_tokens)
+    ):
         yield chunk
 
 
-async def summarize(client: OllamaClient, text: str, model: str | None = None):
+async def summarize(
+    client: OllamaClient,
+    text: str,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+):
     prompt = f"Summarize the following text concisely:\n\n{text}"
-    async for chunk in _sse(client.generate_stream(prompt, model)):
+    async for chunk in _sse(
+        client.generate_stream(prompt, model, temperature=temperature, max_tokens=max_tokens)
+    ):
         yield chunk
 
 
@@ -40,6 +56,8 @@ async def classify(
     text: str,
     categories: list[str],
     model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ):
     cats = ", ".join(categories)
     prompt = (
@@ -47,17 +65,25 @@ async def classify(
         f"Text: {text}\n\n"
         f"Respond with only the category name, nothing else."
     )
-    async for chunk in _sse(client.generate_stream(prompt, model)):
+    async for chunk in _sse(
+        client.generate_stream(prompt, model, temperature=temperature, max_tokens=max_tokens)
+    ):
         yield chunk
 
 
 async def extract_keywords(
-    client: OllamaClient, text: str, model: str | None = None
+    client: OllamaClient,
+    text: str,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ):
     prompt = (
         f"Extract the most important keywords from the following text.\n"
         f"Return them as a comma-separated list with no explanation.\n\n"
         f"Text: {text}"
     )
-    async for chunk in _sse(client.generate_stream(prompt, model)):
+    async for chunk in _sse(
+        client.generate_stream(prompt, model, temperature=temperature, max_tokens=max_tokens)
+    ):
         yield chunk
