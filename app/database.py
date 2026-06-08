@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -24,6 +25,15 @@ def init_db():
                 repeat_penalty   REAL,
                 seed             INTEGER,
                 num_ctx          INTEGER
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                messages   TEXT NOT NULL
             )
         """)
         # Safe migration: add new columns to existing databases
@@ -89,3 +99,49 @@ def get_requests(limit: int = 500) -> list[dict]:
             "SELECT * FROM requests ORDER BY timestamp DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Conversations ─────────────────────────────────────────────────────────────
+
+def save_conversation(name: str, messages: list) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "INSERT INTO conversations (name, messages) VALUES (?, ?)",
+            (name.strip(), json.dumps(messages)),
+        )
+        return cur.lastrowid
+
+
+def list_conversations() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, name, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def load_conversation(conv_id: int) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+    if row:
+        d = dict(row)
+        d["messages"] = json.loads(d["messages"])
+        return d
+    return None
+
+
+def update_conversation(conv_id: int, name: str, messages: list):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE conversations SET name = ?, messages = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (name.strip(), json.dumps(messages), conv_id),
+        )
+
+
+def delete_conversation(conv_id: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))

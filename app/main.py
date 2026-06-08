@@ -10,7 +10,11 @@ from httpx import ConnectError, RemoteProtocolError, TimeoutException
 
 from app import services
 from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
-from app.database import init_db, log_request, update_response, clear_requests
+from app.database import (
+    init_db, log_request, update_response, clear_requests,
+    save_conversation, list_conversations, load_conversation,
+    update_conversation, delete_conversation,
+)
 from app.ollama_client import OllamaClient
 from app.schemas import (
     ChatRequest,
@@ -49,7 +53,8 @@ app.add_middleware(
 
 ollama = OllamaClient(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL)
 
-_SKIP_LOG = {"/health", "/docs", "/openapi.json", "/redoc", "/models", "/reports"}
+_SKIP_LOG = {"/health", "/docs", "/openapi.json", "/redoc", "/models", "/reports",
+             "/conversations", "/requests"}
 
 
 @app.middleware("http")
@@ -150,6 +155,39 @@ async def patch_response(log_id: int, body: dict):
 @app.delete("/requests")
 async def delete_requests():
     clear_requests()
+    return {"ok": True}
+
+
+# ── Conversations ─────────────────────────────────────────────────────────────
+
+@app.get("/conversations")
+async def get_conversations():
+    return {"conversations": list_conversations()}
+
+
+@app.post("/conversations")
+async def create_conversation(body: dict):
+    conv_id = save_conversation(body.get("name", "Untitled"), body.get("messages", []))
+    return {"id": conv_id}
+
+
+@app.get("/conversations/{conv_id}")
+async def get_conversation(conv_id: int):
+    conv = load_conversation(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conv
+
+
+@app.put("/conversations/{conv_id}")
+async def put_conversation(conv_id: int, body: dict):
+    update_conversation(conv_id, body.get("name", "Untitled"), body.get("messages", []))
+    return {"ok": True}
+
+
+@app.delete("/conversations/{conv_id}")
+async def del_conversation(conv_id: int):
+    delete_conversation(conv_id)
     return {"ok": True}
 
 

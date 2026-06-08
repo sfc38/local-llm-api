@@ -70,6 +70,16 @@ def fetch_models() -> list[str]:
     return ["qwen2.5vl:3b"]
 
 
+def fetch_conversations() -> list[dict]:
+    try:
+        r = httpx.get(f"{API_URL}/conversations", timeout=5)
+        if r.status_code == 200:
+            return r.json().get("conversations", [])
+    except Exception:
+        pass
+    return []
+
+
 def extract_pdf_text(data: bytes) -> str:
     try:
         import pypdf
@@ -324,14 +334,91 @@ if page == "Chat":
         st.session_state.file_key = 0
     if "pending_attach" not in st.session_state:
         st.session_state.pending_attach = None
+    if "active_conv_id" not in st.session_state:
+        st.session_state.active_conv_id = None
+    if "active_conv_name" not in st.session_state:
+        st.session_state.active_conv_name = None
 
     submitted = False
     user_input = ""
 
-    if st.button("Clear conversation"):
-        st.session_state.chat_history = []
-        st.session_state.pending_attach = None
-        st.rerun()
+    # ── Conversation controls ─────────────────────────────────────────────────
+    saved_convs = fetch_conversations()
+    conv_map = {f"{c['name']}  ({c['updated_at'][:10]})": c["id"] for c in saved_convs}
+
+    col_clear, col_save, col_sel, col_load, col_del = st.columns([2, 2, 5, 1, 1])
+
+    with col_clear:
+        if st.button("New chat", use_container_width=True):
+            st.session_state.chat_history = []
+            st.session_state.pending_attach = None
+            st.session_state.active_conv_id = None
+            st.session_state.active_conv_name = None
+            st.rerun()
+
+    with col_save:
+        label = "💾 Update" if st.session_state.active_conv_id else "💾 Save"
+        with st.popover(label, use_container_width=True):
+            if not st.session_state.chat_history:
+                st.caption("Nothing to save yet.")
+            else:
+                default_name = st.session_state.active_conv_name or ""
+                save_name = st.text_input("Conversation name", value=default_name,
+                                          placeholder="e.g. PR card analysis")
+                save_as_new = st.checkbox("Save as new copy",
+                                          value=st.session_state.active_conv_id is None)
+                if st.button("Save", key="do_save_conv"):
+                    if save_name.strip():
+                        if st.session_state.active_conv_id and not save_as_new:
+                            httpx.put(
+                                f"{API_URL}/conversations/{st.session_state.active_conv_id}",
+                                json={"name": save_name,
+                                      "messages": st.session_state.chat_history},
+                                timeout=5,
+                            )
+                            st.session_state.active_conv_name = save_name
+                            st.success("Updated!")
+                        else:
+                            r = httpx.post(
+                                f"{API_URL}/conversations",
+                                json={"name": save_name,
+                                      "messages": st.session_state.chat_history},
+                                timeout=5,
+                            )
+                            st.session_state.active_conv_id = r.json().get("id")
+                            st.session_state.active_conv_name = save_name
+                            st.success("Saved!")
+                        st.rerun()
+                    else:
+                        st.warning("Enter a name first.")
+
+    if conv_map:
+        with col_sel:
+            sel_label = st.selectbox(
+                "saved", ["— select a conversation —"] + list(conv_map.keys()),
+                label_visibility="collapsed",
+            )
+        sel_id = conv_map.get(sel_label)
+        with col_load:
+            if st.button("Load", use_container_width=True, disabled=sel_id is None):
+                r = httpx.get(f"{API_URL}/conversations/{sel_id}", timeout=5)
+                conv = r.json()
+                st.session_state.chat_history = conv["messages"]
+                st.session_state.active_conv_id = sel_id
+                st.session_state.active_conv_name = conv["name"]
+                st.session_state.pending_attach = None
+                st.rerun()
+        with col_del:
+            if st.button("🗑️", use_container_width=True, disabled=sel_id is None,
+                         help="Delete this saved conversation"):
+                httpx.delete(f"{API_URL}/conversations/{sel_id}", timeout=5)
+                if st.session_state.active_conv_id == sel_id:
+                    st.session_state.active_conv_id = None
+                    st.session_state.active_conv_name = None
+                st.rerun()
+
+    if st.session_state.active_conv_name:
+        st.caption(f"📂 {st.session_state.active_conv_name}")
 
     # Render conversation history
     for msg in st.session_state.chat_history:
