@@ -282,7 +282,9 @@ if page == "Chat":
                 for img_b64 in msg["_images"]:
                     st.image(base64.b64decode(img_b64), width=250)
             if msg.get("_pdf_name"):
-                st.caption(f"📄 {msg['_pdf_name']}")
+                with st.container(border=True):
+                    st.markdown(f"📄 **{msg['_pdf_name']}**")
+                    st.caption("PDF attachment")
             st.markdown(msg.get("_user_text", msg["content"]))
 
     # ── Bottom bar: 📎 popover + text input, pinned to viewport bottom ─────────
@@ -342,7 +344,13 @@ if page == "Chat":
             if attach["type"] == "pdf":
                 import io
                 pdf_text = extract_pdf_text(io.BytesIO(attach["data"]))
-                full_content = f"{user_input}\n\n[Attached PDF: {attach['name']}]\n{pdf_text}"
+                if not pdf_text or pdf_text.startswith("[Could not"):
+                    pdf_text = "[No text could be extracted — the PDF may be image-based or scanned]"
+                full_content = (
+                    f"{user_input}\n\n"
+                    f"[The user attached a PDF file named '{attach['name']}'. "
+                    f"The following text was extracted from it:]\n\n{pdf_text}"
+                )
                 pdf_name = attach["name"]
             else:
                 images = [attach["data"]]
@@ -361,7 +369,9 @@ if page == "Chat":
             if images:
                 st.image(base64.b64decode(images[0]), width=250)
             if pdf_name:
-                st.caption(f"📄 {pdf_name}")
+                with st.container(border=True):
+                    st.markdown(f"📄 **{pdf_name}**")
+                    st.caption("PDF attachment")
             st.markdown(user_input)
 
         api_messages = [
