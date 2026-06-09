@@ -92,7 +92,7 @@ async def log_requests(request: Request, call_next):
             request.url.path, model_used, prompt_preview, duration_ms, response.status_code,
             temperature=temperature, max_tokens=max_tokens, top_p=top_p, top_k=top_k,
             repeat_penalty=repeat_penalty, seed=seed, num_ctx=num_ctx,
-        )
+        )  # duration_ms here = ttft_ms (time until stream starts)
         response.headers["X-Log-ID"] = str(log_id)
 
     return response
@@ -148,7 +148,8 @@ async def get_reports():
 
 @app.patch("/requests/{log_id}/response")
 async def patch_response(log_id: int, body: dict):
-    update_response(log_id, body.get("response_preview", ""))
+    update_response(log_id, body.get("response_preview", ""),
+                    body.get("response_time_ms"), body.get("ttft_ms"))
     return {"ok": True}
 
 

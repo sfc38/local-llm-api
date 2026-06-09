@@ -16,6 +16,7 @@ def init_db():
                 model            TEXT,
                 prompt_preview   TEXT,
                 response_preview TEXT,
+                ttft_ms          INTEGER,
                 response_time_ms INTEGER,
                 status_code      INTEGER,
                 temperature      REAL,
@@ -39,6 +40,8 @@ def init_db():
         # Safe migration: add new columns to existing databases
         for col, typ in [
             ("response_preview", "TEXT"),
+            ("ttft_ms", "INTEGER"),
+            ("response_time_ms", "INTEGER"),
             ("temperature", "REAL"),
             ("max_tokens", "INTEGER"),
             ("top_p", "REAL"),
@@ -57,7 +60,7 @@ def log_request(
     endpoint: str,
     model: str,
     prompt_preview: str,
-    response_time_ms: int,
+    ttft_ms: int,
     status_code: int,
     temperature=None,
     max_tokens=None,
@@ -70,21 +73,28 @@ def log_request(
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
             """INSERT INTO requests
-               (endpoint, model, prompt_preview, response_time_ms, status_code,
+               (endpoint, model, prompt_preview, ttft_ms, status_code,
                 temperature, max_tokens, top_p, top_k, repeat_penalty, seed, num_ctx)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (endpoint, model, prompt_preview, response_time_ms, status_code,
+            (endpoint, model, prompt_preview, ttft_ms, status_code,
              temperature, max_tokens, top_p, top_k, repeat_penalty, seed, num_ctx),
         )
         return cur.lastrowid
 
 
-def update_response(log_id: int, response_preview: str):
+def update_response(log_id: int, response_preview: str,
+                    response_time_ms: int | None = None, ttft_ms: int | None = None):
+    cols = ["response_preview = ?"]
+    params: list = [response_preview[:1000]]
+    if response_time_ms is not None:
+        cols.append("response_time_ms = ?")
+        params.append(response_time_ms)
+    if ttft_ms is not None:
+        cols.append("ttft_ms = ?")
+        params.append(ttft_ms)
+    params.append(log_id)
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "UPDATE requests SET response_preview = ? WHERE id = ?",
-            (response_preview[:1000], log_id),
-        )
+        conn.execute(f"UPDATE requests SET {', '.join(cols)} WHERE id = ?", params)
 
 
 def clear_requests():

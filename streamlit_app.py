@@ -2,6 +2,7 @@ import base64
 import io
 import os
 import re
+import time
 from collections import Counter
 
 import httpx
@@ -26,8 +27,14 @@ def stream_response(endpoint: str, payload: dict):
                     r.read()
                     yield f"[Error {r.status_code}: {r.text}]"
                     return
+                first = True
                 for line in r.iter_lines():
                     if line.startswith("data: ") and line != "data: [DONE]":
+                        if first:
+                            t0 = st.session_state.get("_stream_start")
+                            if t0:
+                                st.session_state["_pending_ttft_ms"] = int((time.time() - t0) * 1000)
+                            first = False
                         yield line[6:]
     except httpx.ConnectError:
         yield "[Error: API server not reachable. Run: uvicorn app.main:app --reload]"
@@ -35,16 +42,19 @@ def stream_response(endpoint: str, payload: dict):
         yield f"[Error: {e}]"
 
 
-def _patch_response(response_text: str):
+def _patch_response(response_text: str, elapsed_ms: int | None = None):
     log_id = st.session_state.pop("_pending_log_id", None)
+    ttft_ms = st.session_state.pop("_pending_ttft_ms", None)
+    st.session_state.pop("_stream_start", None)
     if not log_id or not response_text:
         return
+    body: dict = {"response_preview": response_text[:1000]}
+    if elapsed_ms is not None:
+        body["response_time_ms"] = elapsed_ms
+    if ttft_ms is not None:
+        body["ttft_ms"] = ttft_ms
     try:
-        httpx.patch(
-            f"{API_URL}/requests/{log_id}/response",
-            json={"response_preview": response_text[:1000]},
-            timeout=3,
-        )
+        httpx.patch(f"{API_URL}/requests/{log_id}/response", json=body, timeout=3)
     except Exception:
         pass
 
@@ -53,11 +63,14 @@ def render_stream(endpoint: str, payload: dict) -> str:
     output = st.empty()
     output.markdown("_Thinking…_")
     response_text = ""
+    start = time.time()
+    st.session_state["_stream_start"] = start
     for token in stream_response(endpoint, payload):
         response_text += token
         output.markdown(response_text + "▌")
+    elapsed_ms = int((time.time() - start) * 1000)
     output.markdown(response_text)
-    _patch_response(response_text)
+    _patch_response(response_text, elapsed_ms)
     return response_text
 
 
@@ -544,6 +557,8 @@ if page == "Chat":
         ]
         payload = base_payload(messages=api_messages)
 
+        start = time.time()
+        st.session_state["_stream_start"] = start
         with st.chat_message("assistant"):
             output = st.empty()
             output.markdown("_Thinking…_")
@@ -559,8 +574,8 @@ if page == "Chat":
                     "If you attached a scanned PDF, it may be too large — "
                     "try increasing **num_ctx** in the sidebar or use a shorter document."
                 )
-
-        _patch_response(response_text)
+        elapsed_ms = int((time.time() - start) * 1000)
+        _patch_response(response_text, elapsed_ms)
         st.session_state.chat_history.append({"role": "assistant", "content": response_text})
 
 # ── Generate ──────────────────────────────────────────────────────────────────
@@ -658,16 +673,30 @@ elif page == "Reports":
 
         # ── Key metrics ───────────────────────────────────────────────────────
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total Requests", len(df))
-        c2.metric("Avg Response Time", f"{df['response_time_ms'].mean():.0f} ms")
-        c3.metric("Success Rate", f"{(df['status_code'] == 200).mean() * 100:.0f}%")
+        avg_total = df["response_time_ms"].mean()
+        avg_ttft = df["ttft_ms"].mean() if "ttft_ms" in df.columns else None
+        c1.metric("Total Requests", len(df),
+                  help="Total number of API calls logged across all endpoints.")
+        c2.metric("Avg Total Time", f"{avg_total:.0f} ms" if not pd.isna(avg_total) else "—",
+                  help="Average end-to-end response time measured from the moment you send a request "
+                       "until the last token is received. Includes model generation time.")
+        c3.metric("Success Rate", f"{(df['status_code'] == 200).mean() * 100:.0f}%",
+                  help="Percentage of requests that returned HTTP 200 OK. "
+                       "Non-200 responses indicate errors (e.g. model overloaded, timeout).")
+        c4, c5 = st.columns(2)
+        c4.metric("Avg Time to First Token", f"{avg_ttft:.0f} ms" if avg_ttft and not pd.isna(avg_ttft) else "—",
+                  help="TTFT — how long you wait before any text appears (the 'Thinking…' duration). "
+                       "Measured from the moment you hit send to the first word of the response. "
+                       "High TTFT usually means the model is busy loading or the context is very large.")
+        c5.metric("Requests Today", int((df["timestamp"].dt.date == pd.Timestamp.today().date()).sum()),
+                  help="Number of API calls made today (since midnight).")
 
         st.divider()
 
         # ── All prompts & responses ───────────────────────────────────────────
         st.subheader("All Requests")
         display_cols = ["timestamp", "endpoint", "model", "prompt_preview", "response_preview",
-                        "response_time_ms", "status_code",
+                        "ttft_ms", "response_time_ms", "status_code",
                         "temperature", "max_tokens", "top_p", "top_k",
                         "repeat_penalty", "seed", "num_ctx"]
         display_cols = [c for c in display_cols if c in df.columns]
@@ -675,7 +704,8 @@ elif page == "Reports":
             df[display_cols].rename(columns={
                 "prompt_preview": "prompt",
                 "response_preview": "response",
-                "response_time_ms": "time_ms",
+                "ttft_ms": "TTFT (ms)",
+                "response_time_ms": "total (ms)",
             }),
             use_container_width=True,
         )
@@ -690,5 +720,5 @@ elif page == "Reports":
             st.caption("Requests by endpoint")
             st.bar_chart(df["endpoint"].value_counts())
         with col_avg:
-            st.caption("Avg response time by endpoint (ms)")
-            st.bar_chart(df.groupby("endpoint")["response_time_ms"].mean().sort_values())
+            st.caption("Avg total response time by endpoint (ms)")
+            st.bar_chart(df.groupby("endpoint")["response_time_ms"].mean().round(0).sort_values())

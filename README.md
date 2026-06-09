@@ -29,7 +29,7 @@ Learn API design and local LLM integration by building a clean Python backend th
 - Attach images or PDFs to chat messages via a 📎 popover next to the input
 - Text PDFs: all pages extracted and sent as context
 - Scanned PDFs: pages rendered as JPEG images and sent to the vision model
-- Reports page: prompts, responses, hyperparameters, endpoint breakdown charts, CSV export
+- Reports page: prompts, responses, hyperparameters, TTFT + total response time per request, endpoint breakdown charts, CSV export
 - Model selector dropdown (live from Ollama), 7 hyperparameter sliders with explanations
 
 ---
