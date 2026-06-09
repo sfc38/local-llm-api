@@ -1,5 +1,6 @@
 import base64
 import io
+import os
 import re
 from collections import Counter
 
@@ -7,7 +8,7 @@ import httpx
 import pandas as pd
 import streamlit as st
 
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Local LLM API Playground", layout="wide")
 

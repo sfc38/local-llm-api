@@ -1,0 +1,16 @@
+[Unit]
+Description=Local LLM API (FastAPI / Uvicorn)
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/local-llm-api
+ExecStart=/home/ubuntu/local-llm-api/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+Environment=OLLAMA_BASE_URL=http://localhost:11434
+Environment=OLLAMA_MODEL=qwen2.5vl:3b
+
+[Install]
+WantedBy=multi-user.target
