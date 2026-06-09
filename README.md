@@ -12,20 +12,25 @@ Learn API design and local LLM integration by building a clean Python backend th
 
 ## Features
 
+**API endpoints**
 - `GET /health` — check that the API and Ollama are reachable
-- `POST /chat` — multi-turn conversation with full memory across turns
-- `POST /generate` — single prompt with optional images, temperature and length control
+- `POST /chat` — multi-turn conversation with full history
+- `POST /generate` — single prompt with optional images
 - `POST /describe-image` — send a base64 image and get a description
 - `POST /summarize` — summarize a block of text
 - `POST /classify` — classify text into a provided set of categories
 - `POST /extract-keywords` — extract key terms from text
-- Per-request model selector — override the default model on any endpoint
 - Streaming responses via Server-Sent Events (SSE)
-- Request logging to SQLite (`logs/requests.db`) and `logs/api.log`
-- Reports page in Streamlit — metrics, charts, CSV export of all requests
-- PDF and image attachments in the Streamlit chat interface
-- Interactive API docs at `http://127.0.0.1:8000/docs` (Swagger UI, built-in)
-- Streamlit frontend for browser-based testing
+- All 7 sampling hyperparameters supported per request
+
+**Streamlit UI**
+- Chat with persistent conversation history and *Thinking…* indicator
+- Save / load / delete named conversations (stored in SQLite — works like ChatGPT history)
+- Attach images or PDFs to chat messages via a 📎 popover next to the input
+- Text PDFs: all pages extracted and sent as context
+- Scanned PDFs: pages rendered as JPEG images and sent to the vision model
+- Reports page: prompts, responses, hyperparameters, endpoint breakdown charts, CSV export
+- Model selector dropdown (live from Ollama), 7 hyperparameter sliders with explanations
 
 ---
 
@@ -40,6 +45,8 @@ Learn API design and local LLM integration by building a clean Python backend th
 | HTTP client | httpx | BSD |
 | Validation | Pydantic | MIT |
 | Frontend | Streamlit | Apache 2.0 |
+| PDF text extraction | pypdf | BSD-3-Clause |
+| Scanned PDF rendering | pypdfium2 | Apache 2.0 |
 | Language | Python 3.10+ | PSF |
 
 All tools are free and open-source with licenses compatible with commercial use.
@@ -49,7 +56,7 @@ All tools are free and open-source with licenses compatible with commercial use.
 ## Prerequisites
 
 1. **Python 3.10+** installed
-2. **Ollama** installed — download from [ollama.com](https://ollama.com) (free, open-source, use the official Mac/Windows app, not Homebrew)
+2. **Ollama** installed — download from [ollama.com](https://ollama.com) (use the official Mac/Windows app, not Homebrew)
 3. **Qwen2.5-VL 3B model** pulled:
 
 ```bash
@@ -86,6 +93,12 @@ uvicorn app.main:app --reload
 
 - **Swagger UI** (API testing): `http://127.0.0.1:8000/docs`
 - **Streamlit UI** (browser playground): `streamlit run streamlit_app.py`
+
+To access from another device on the same Wi-Fi:
+
+```bash
+streamlit run streamlit_app.py --server.address 0.0.0.0
+```
 
 ---
 
@@ -128,14 +141,6 @@ curl -X POST http://127.0.0.1:8000/generate \
   -d '{"prompt": "Explain what RAG means.", "temperature": 0.5, "max_tokens": 200}'
 ```
 
-**Use a different model for one request:**
-
-```bash
-curl -X POST http://127.0.0.1:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello", "model": "qwen2.5-coder:3b"}'
-```
-
 **Describe an image (Python):**
 
 ```python
@@ -161,10 +166,10 @@ All endpoints accept these optional fields:
 | `model` | string | — | Override the default model for this request |
 | `temperature` | float | 0–2 | Randomness. Lower = more focused, higher = more creative |
 | `max_tokens` | int | 1–8192 | Maximum tokens to generate |
-| `top_p` | float | 0–1 | Nucleus sampling. 0.9 considers top-90% of probability mass |
-| `top_k` | int | 1–100 | Only sample from the top-k most likely next tokens |
-| `repeat_penalty` | float | 0.5–2 | Penalise recently used tokens to reduce repetition |
-| `seed` | int | — | Set for reproducible outputs |
+| `top_p` | float | 0–1 | Nucleus sampling threshold |
+| `top_k` | int | 1–100 | Candidate pool size per token |
+| `repeat_penalty` | float | 0.5–2 | Penalise recently used tokens |
+| `seed` | int | — | Fixed seed for reproducible outputs |
 | `num_ctx` | int | 512–32768 | Context window size in tokens |
 
 ---
@@ -185,16 +190,20 @@ For Oracle Cloud deployment: set `OLLAMA_BASE_URL=http://<server-ip>:11434`.
 ```
 local-llm-api/
   app/
-    main.py          — FastAPI app, routes, logging, error handlers, CORS
+    main.py          — FastAPI app, routes, middleware, error handlers, CORS
     config.py        — Environment variable config
-    schemas.py       — Pydantic request models
+    schemas.py       — Pydantic request models (LLMBase + 7 hyperparameters)
     ollama_client.py — Reusable async HTTP client for Ollama
     services.py      — Prompt templates and SSE streaming
+    database.py      — SQLite helpers (requests log + conversations)
   tests/
     test_api.py      — Integration tests (8 tests, all passing)
   streamlit_app.py   — Browser-based UI playground
   Dockerfile         — Container for the FastAPI server
   requirements.txt
+  logs/
+    requests.db      — SQLite: request log + saved conversations (gitignored)
+    api.log          — Text log (gitignored)
 ```
 
 ---
@@ -212,10 +221,9 @@ pytest tests/ -v
 ## Future Improvements
 
 - Oracle Cloud deployment (Ollama + FastAPI on Always Free Ampere ARM instance)
-- Conversation history limit (truncate old messages at context window)
-- File upload endpoint (PDF, txt) → auto-summarize flow
-- Rate limiting
-- Authentication / API key support
+- PDF chunking for documents longer than 3 pages (scanned) or very long text PDFs
+- Conversation history truncation at context window limit
+- Rate limiting and API key authentication
 
 ---
 
